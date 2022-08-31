@@ -207,18 +207,45 @@ _vector_table:
 .set	VBAR, _vector_table
 .org VBAR
 
+/* Target and source on the same exception level with source SP = SP_EL0 */
+.org (VBAR + 0x000)
+	b	SynchronousInterruptHandler
+.org (VBAR + 0x080)
+	b	IRQInterruptHandler
+.org (VBAR + 0x100)
+	b	FIQInterruptHandler
+.org (VBAR + 0x180)
+	b	SErrorInterruptHandler
+
+/* Target and source on the same exception level with source SP = SP_ELx */
 .org (VBAR + 0x200)
 	b	SynchronousInterruptHandler
-
 .org (VBAR + 0x280)
 	b	IRQInterruptHandler
-
 .org (VBAR + 0x300)
 	b	FIQInterruptHandler
-
 .org (VBAR + 0x380)
 	b	SErrorInterruptHandler
 
+/* Source is at lower exception level running AArch64 */
+.org (VBAR + 0x400)
+	b	SynchronousInterruptHandler
+.org (VBAR + 0x480)
+	b	IRQInterruptHandler
+.org (VBAR + 0x500)
+	b	FIQInterruptHandler
+.org (VBAR + 0x580)
+	b	SErrorInterruptHandler
+
+/* Source is at lower exception level running AArch32 */
+.org (VBAR + 0x600)
+	b	SynchronousInterruptHandler
+.org (VBAR + 0x680)
+	b	IRQInterruptHandler
+.org (VBAR + 0x700)
+	b	FIQInterruptHandler
+.org (VBAR + 0x780)
+	b	SErrorInterruptHandler
 
 SynchronousInterruptHandler:
 	saveregister
