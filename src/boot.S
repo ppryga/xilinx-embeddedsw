@@ -203,6 +203,7 @@ InitEL3:
 	 ldr	x0, =FPUStatus
 	 str 	xzr, [x0]
 #endif
+
 	/* Configure SCR_EL3 (following Arm Cortex -A53 MPCore Processor TRM Revision: r0p4):
 	 * - Do not trap WFE (TWE bit[13] = 0) WFI (TWI - bit[12] = 0) to EL3
 	 * - Enable Secure EL1 access to CNTPS_TVAL_EL1, CNTS_CTL_EL1, and CNTPS_CVAL_EL1 registers
@@ -225,23 +226,37 @@ InitEL3:
 	orr	w1, w1, #(1 << 10)	// Set RW bit
 	msr	SCR_EL3, x1
 
-	/*configure cpu auxiliary control register EL1 */
-	ldr	x0,=0x80CA000		// L1 Data prefetch control - 5, Enable device split throttle, 2 independent data prefetch streams
+	/* Configure cpu auxiliary control register EL1:
+	 * - Enable 128th consecutive streaming cache line doe not allocate in the L1 or L2 (RADIS
+	 *   bits [28:27] = 0b01)
+	 * - Enable 2 independend data prefetch streams (NPFSTRM bits [20:19] = 0b01)
+	 * - Enable 5 outstanding L1 data prefetches allowed (L1PCTL bits [15:13] = 0b01)
+	 */
+	mov	x0, #0
+	orr	x0, x0, #(0b01 << 27)	// Set RADIS bits
+	orr	x0, x0, #(0b01 << 19)	// Set NPFSTRM bits
+	orr	x0, x0, #(0b01 << 13)	// Set L1PCTL bits
 #if CONFIG_ARM_ERRATA_855873
-	/*
-	 *  Set ENDCCASCI bit in CPUACTLR_EL1 register, to execute data
-	 *  cache clean operations as data cache clean and invalidate
-	 *
+	/*  Set ENDCCASCI bit in CPUACTLR_EL1 register, to execute data
+	 *  cache clean operations as data cache clean and invalidate.
 	 */
 	orr	x0, x0, #(1 << 44)	// Set ENDCCASCI bit
 #endif
 	msr	S3_1_C15_C2_0, x0 	// CPUACTLR_EL1
 
-	/* program the counter frequency */
+	/* Program the counter frequency. It may be confiugre from highest available exception level
+	 * only.
+	 */
 	ldr	x0,=counterfreq
 	msr	CNTFRQ_EL0, x0
 
-	/* Enable hardware coherency between cores*/
+	/* Configure CPU Extended Control Register:
+	 * - Enable hardware coherency between cores (SMPEN bit[6] = 1)
+	 * - Disable SIMD and Floating-point retenction circuit (FPRETCTL bits[5:3] = 0b000).
+	 *   This is default value after reset.
+	 * - Disable CPU retention circuit (CPURETCTL bits[2:0] = 0b000). This is default value
+	 *   after reset.
+	 */
 	mrs	x0, S3_1_c15_c2_1	// Read EL1 CPU Extended Control Register
 	orr	x0, x0, #(1 << 6)	// Set the SMPEN bit
 	msr	S3_1_c15_c2_1, x0	// Write EL1 CPU Extended Control Register
@@ -256,8 +271,7 @@ InitEL3:
 	ldr	x1, =L0Table		// Get address of level 0 for TTBR0_EL3
 	msr	TTBR0_EL3, x1		// Set TTBR0_EL3
 
-	/* Set up memory attributes
-	 * This equates to:
+	/* Set up memory attributes. This equates to:
 	 * 0 = b01000100 = Normal, Inner/Outer Non-Cacheable
 	 * 1 = b11111111 = Normal, Inner/Outer WB/WA/RA
 	 * 2 = b00000000 = Device-nGnRnE
@@ -285,17 +299,27 @@ InitEL3:
 	msr	TCR_EL3, x1
 	isb
 
-	/* Enable SError Exception for asynchronous abort */
-	mrs	x1, DAIF
-	bic	x1, x1,#(0x1<<8)
-	msr	DAIF, x1
+	/* Enable SError Exception for asynchronous abort
+	 * Temporarly commented out due to different initialization design.
+	 */
+	//mrs	x1, DAIF
+	//bic	x1, x1,#(0x1<<8)
+	//msr	DAIF, x1
 
-	/* Configure SCTLR_EL3 */
+	/* Configure System Control Register SCTLR_EL3:
+	 * - Use little endian for data access and stage 1 translation table at EL3 (EE bit[25] = 0)
+	 * - Do not force XN permissions for regions with write permissions (WXN bit[19] = 0)
+	 * - Enable instructions cache (I bit[12] - 1)
+	 * - Enable stack pointer alignment check (SA bit[3] = 1)
+	 * - Enable data and unified cache (C bit[2] = 1)
+	 * - Disable alignment fault checking (A bit[1] = 0)
+	 * - Enable MMU for EL3 (M bit[0] = 1)
+	 */
 	mov	x1, #0			// Most of the SCTLR_EL3 bits are unknown at reset
-	orr	x1, x1, #(1 << 12)	// Enable I cache
-	orr	x1, x1, #(1 << 3)	// Enable SP alignment check
-	orr	x1, x1, #(1 << 2)	// Enable caches
-	orr	x1, x1, #(1 << 0)	// Enable MMU
+	orr	x1, x1, #(1 << 12)	// Set I bit
+	orr	x1, x1, #(1 << 3)	// Set SP bit
+	orr	x1, x1, #(1 << 2)	// Set C bit
+	orr	x1, x1, #(1 << 0)	// Set M bit
 	msr	SCTLR_EL3, x1
 	dsb	sy
 	isb
