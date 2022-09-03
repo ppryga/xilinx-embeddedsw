@@ -307,12 +307,12 @@ InitEL3:
 	msr	TCR_EL3, x1
 	isb
 
-	/* Enable SError Exception for asynchronous abort
-	 * Temporarly commented out due to different initialization design.
-	 */
-	//mrs	x1, DAIF
-	//bic	x1, x1,#(0x1<<8)
-	//msr	DAIF, x1
+#ifndef CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT
+	/* Enable SError Exception for asynchronous abort */
+	mrs	x1, DAIF
+	bic	x1, x1,#(0x1<<8)
+	msr	DAIF, x1
+#endif /* CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT */
 
 	/* Configure System Control Register SCTLR_EL3:
 	 * - Use little endian for data access and stage 1 translation table at EL3 (EE bit[25] = 0)
@@ -482,13 +482,46 @@ InitEL2:
 	dsb	sy
 	isb
 
-	b	_startup		// Jump to start
+	/* Jump to EL1 exception level to continue boot proces there. EL1 will be used to run
+	 * kernel. Application will be executed in EL0 exception level.
+	 */
+
+	/* Set exception return address to InitEL1 */
+	adr	x0, InitEL1
+	msr	ELR_EL3, x0
+
+	/* Update Saved Program Status Register to change exception level to EL1:
+	 * - Disable all interrupts (DAIF bits[9:6] = 0b1111)
+	 * - Set AArch64 mode for next exception level (M bit[4] = 0)
+	 * - Set next exception level EL1 (M bits[3:2] = 0b01)
+	 * - Set EL1 stack pointer to private stack (M bit[0] = 1)
+	 */
+
+	mrs	x0, SPSR_EL3
+	orr	x0, x0, #(0b1111 << 6)	//Set DAIF bits
+	bic	x0, x0, #(0b1111)	//Clear M[4:0] bits
+	orr	x0, x0, #(0b01 << 2)	//Set M[3:2] bits
+	orr	x0, x0, #(1 << 0)	//Set M[0] bit
+	msr	SPSR_EL3, x0
+
+	/* Prepare stack pointer for Exception level EL1 */
+	ldr	x0, =EL1_stack
+	msr	SP_EL1, x0
+	isb
+
+	/* Jump to next exception level */
+	eret
+
+#ifndef CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT
 .else
 	b	error			// Present exception level and selected exception level mismatch
 .endif /* EL3 == 1 */
+#endif /* CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT */
 
 InitEL1:
+#ifndef CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT
 .if (EL1_NONSECURE == 1)
+#endif /* CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT */
 	/* Set vector table base address*/
 	ldr	x1, =vector_base
 	msr	VBAR_EL1, x1
