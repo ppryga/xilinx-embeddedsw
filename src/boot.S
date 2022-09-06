@@ -85,6 +85,8 @@
 .global _prestart
 .global _boot
 
+.global ReturnToUser
+
 .global __el3_stack
 .global __el2_stack
 .global __el1_stack
@@ -598,6 +600,26 @@ InitEL1:
 	mrs	x1, DAIF
 	bic	x1, x1, #(0x1<<8)
 	msr	DAIF, x1
+#else
+	/* Configure Counter-timer Kernel Control Register (CNTKCTL_EL1):
+	 * - Disable traping access to CNTP_XXX_EL0 registers from EL0(EL0PTEN bit[9] = 1)
+	 * - Disable trapping access to CNTV_XXX_EL0 registers from EL0(EL0VTEN bit[8] = 1)
+	 * - Set generation of events for every cycle(EVNTI bits[7:4] = 0b0000) - arbitrary choice
+	 *   for initialization. Correct value should be set when CNTVCT_EL0 counter register is
+	 *   about use for events stream.
+	 * - Set a 0 to 1 transition of the trigger bit to trigger an event (EVNTDIR bit[3] = 0)
+	 * - Disable events stream generation (EVNTEN bit[2] = 0)
+	 * - Disable trapping access to CNTVCTEN_EL0, CNTFRQ_EL0 registers from EL0(EL0VCTEN
+	 *   bit[1] = 1)
+	 * - Disable trapping access to CNTPCT_EL0, CNTFRQ_EL0 registers from EL0(EL0CTEN
+	 *   bit[0] = 1)
+	 */
+	 mov	x0, #0
+	 orr	x0, x0, #(1 << 9)	//Set EL0PTEN bit
+	 orr	x0, x0, #(1 << 8)	//Set EL0VTEN bit
+	 orr	x0, x0, #(1 << 1)	//Set EL0VCTEN bit
+	 orr	x0, x0, #(1 << 0)	//Set EL0CTEN bit
+	 msr	CNTKCTL_EL1, x0
 #endif /* CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT */
 
 	/* Configure System Control Register SCTLR_EL1:
@@ -703,6 +725,41 @@ invalidateCaches_next_level:
 
 invalidateCaches_end:
 	ret
+
+/* This is a temporary place for the return to user land function. In future it has to be moved to
+ * some other, probably exception entry source file.
+ *
+ * ToDo: Change the function to check what is current exception level to use proper registers
+ *       to configure return.
+ *
+ * The function shall be called only from exception context, it ends with eret call.
+ * x0 register stores return address
+ */
+ReturnToUser:
+	/* Set exception return address to InitEL1 */
+	msr	ELR_EL1, x0
+
+	/* Update Saved Program Status Register to change exception level to EL0:
+	 * - Enable interrupts (DAIF bits[9:6] = 0b0000)
+	 * - Set AArch64 mode for next exception level (M bit[4] = 0)
+	 * - Set next exception level EL0 (M bits[3:2] = 0b00)
+	 * - Set EL0 stack pointer for EL0 (M bit[0] = 1)
+	 */
+
+	mrs	x0, SPSR_EL1
+	bic	x0, x0, #(0b0111 << 6)	//Clear DAIF bits
+	bic	x0, x0, #(0b1111)	//Clear M[4:0] bits
+	bic	x0, x0, #(0b11 << 2)	//Clear M[3:2] bits
+	bic	x0, x0, #(1 << 0)	//Clear M[0] bit
+	msr	SPSR_EL1, x0
+
+	/* Prepare stack pointer for Exception level EL1 */
+	ldr	x1, =EL0_stack
+	msr	SP_EL0, x1
+	isb
+
+	/* Jump to next exception level */
+	eret
 
 .end
 /**
