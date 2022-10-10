@@ -37,6 +37,7 @@
 ******************************************************************************/
 
 #include "bspconfig.h"
+.include "esr.S"
 
 .org 0
 .text
@@ -107,7 +108,7 @@
 
 	/* Prepare FP in case an assemblu ISR requires to use it as base for access to data stored
 	 * on a stack, hence the FP(x29) should point to a base of a function call frame.
-
+	 *
 	 * NOTE: This operation may be optimized out in case the stack will be left in unchanged
 	 *       state by assembly ISR code.
 	 */
@@ -222,7 +223,7 @@
 .endm
 
 .macro get_esr_elx
-	/* Check current exception level to ger proper exceptions syndrom register */
+	/* Check current exception level to get proper exceptions syndrom register */
 	mrs	x0, currentEL
 	cmp	x0, CURR_EL2
 	blt	2f
@@ -352,19 +353,63 @@ _vector_table:
 .org (VBAR + 0x780)
 	b	SErrorInterruptHandler
 
+_vector_table_el1:
+.set	VBAR_EL1, _vector_table_el1
+.org VBAR_EL1
+
+/* Target and source on the same exception level with source SP = SP_EL0 */
+.org (VBAR_EL1 + 0x000)
+	b	SynchronousInterruptHandlerEL1
+.org (VBAR_EL1 + 0x080)
+	b	IRQInterruptHandler
+.org (VBAR_EL1 + 0x100)
+	b	FIQInterruptHandler
+.org (VBAR_EL1 + 0x180)
+	b	SErrorInterruptHandler
+
+/* Target and source on the same exception level with source SP = SP_ELx */
+.org (VBAR_EL1 + 0x200)
+	b	SynchronousInterruptHandlerEL1
+.org (VBAR_EL1 + 0x280)
+	b	IRQInterruptHandler
+.org (VBAR_EL1 + 0x300)
+	b	FIQInterruptHandler
+.org (VBAR_EL1 + 0x380)
+	b	SErrorInterruptHandler
+
+/* Source is at lower exception level running AArch64 */
+.org (VBAR_EL1 + 0x400)
+	b	SynchronousInterruptHandlerEL1
+.org (VBAR_EL1 + 0x480)
+	b	IRQInterruptHandler
+.org (VBAR_EL1 + 0x500)
+	b	FIQInterruptHandler
+.org (VBAR_EL1 + 0x580)
+	b	SErrorInterruptHandler
+
+/* Source is at lower exception level running AArch32 */
+.org (VBAR_EL1 + 0x600)
+	b	SynchronousInterruptHandlerEL1
+.org (VBAR_EL1 + 0x680)
+	b	IRQInterruptHandler
+.org (VBAR_EL1 + 0x700)
+	b	FIQInterruptHandler
+.org (VBAR_EL1 + 0x780)
+	b	SErrorInterruptHandler
+
 SynchronousInterruptHandler:
 	save_registers
 
 	get_esr_elx
 
-	and	x0, x0, #(0x3F << 26)
-	mov	x1, #(0x7 << 26)
+	lsr	x0, x0, #ESR_ELX_EC_OFFSET
+	and	x0, x0, #ESR_ELX_EC_MASK
+	mov	x1, #ESR_ELX_EC_ASIMD
 	cmp	x0, x1
-/* If exception is not due to floating point access go to synchronous handler */
+/* If exception is not caused by floating point access go to synchronous handler */
 	bne	synchronoushandler
 
-/*
- * If excpetion occurred due to floating point access, Enable the floating point
+/* If excpetion occurred due to floating point access, Enable the floating point
  * access i.e. do not trap floating point instruction
  */
 	get_cptr_elx
@@ -389,6 +434,55 @@ SynchronousInterruptHandler:
 	b	restorecontext
 storefloat:
 	save_float_registers
+/* No further handling of exeption related with floating point.
+ * Just a placeholder for future.
+ */
+	b	restorecontext
+synchronoushandler:
+	bl	SynchronousInterrupt
+restorecontext:
+	restore_registers
+	exception_return
+
+SynchronousInterruptHandlerEL1:
+	save_registers
+
+	mrs	x0, ESR_EL1
+	lsr	x0, x0, #ESR_ELX_EC_OFFSET
+	and	x0, x0, #ESR_ELX_EC_MASK
+	mov	x1, #ESR_ELX_EC_ASIMD
+	cmp	x0, x1
+/* If exception is not caused by floating point access go to synchronous handler */
+	bne	synchronoushandler
+
+/* If excpetion occurred due to floating point access, Enable the floating point
+ * access i.e. do not trap floating point instruction
+ */
+	mrs	x1, CPTR_EL1
+	isb
+
+/* If the floating point access was previously enabled, store FPU context
+ * registers(storefloat).
+ */
+	ldr	x0, =FPUStatus
+	ldrb	w1,[x0]
+	cbnz	w1, storefloat
+/*
+ * If the floating point access was not enabled previously, save the status of
+ * floating point accessibility i.e. enabled and store floating point context
+ * array address(FPUContext) to FPUContextBase.
+ */
+	mov	w1, #0x1
+	strb	w1, [x0]
+	ldr	x0, =FPUContext
+	ldr	x1, =FPUContextBase
+	str	x0,[x1]
+	b	restorecontext
+storefloat:
+	save_float_registers
+/* No further handling of exeption related with floating point.
+ * Just a placeholder for future.
+ */
 	b	restorecontext
 synchronoushandler:
 	bl	SynchronousInterrupt
