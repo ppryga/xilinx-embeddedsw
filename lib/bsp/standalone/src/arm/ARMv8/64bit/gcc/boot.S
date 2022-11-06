@@ -156,6 +156,7 @@ _boot:
 	mov	x28, #0
 	mov	x29, #0
 	mov	x30, #0
+
 #if 0 //don't put other a53 cpus in wfi
 	/* Which core am I ? */
 	mrs	x0, MPIDR_EL1
@@ -179,6 +180,11 @@ InitEL3:
 #ifndef CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT
 .if (EL3 == 1)
 #endif /* CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT */
+
+	/* Clear Saved Program Status Registers for EL3 and EL2 */
+	msr	SPSR_EL3, xzr
+	msr	SPSR_EL2, xzr
+
 	/* Set vector table base address*/
 	ldr	x1, =vector_base
 	msr	VBAR_EL3, x1
@@ -526,6 +532,10 @@ InitEL1:
 #ifndef CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT
 .if (EL1_NONSECURE == 1)
 #endif /* CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT */
+
+	/* Clear Saved Program Status Registers for EL1 */
+	msr	SPSR_EL1, xzr
+
 	/* Set vector table base address*/
 	ldr	x1, =vector_base
 	msr	VBAR_EL1, x1
