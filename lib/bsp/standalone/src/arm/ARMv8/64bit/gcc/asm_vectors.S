@@ -65,57 +65,115 @@
 
 .set FPUContextSize, 528
 
-.macro saveregister
-	stp	X0,X1, [sp,#-0x10]!
-	stp	X2,X3, [sp,#-0x10]!
-	stp	X4,X5, [sp,#-0x10]!
-	stp	X6,X7, [sp,#-0x10]!
-	stp	X8,X9, [sp,#-0x10]!
-	stp	X10,X11, [sp,#-0x10]!
-	stp	X12,X13, [sp,#-0x10]!
-	stp	X14,X15, [sp,#-0x10]!
-	stp	X16,X17, [sp,#-0x10]!
-	stp 	X18,X19, [sp,#-0x10]!
-	stp 	X29,X30, [sp,#-0x10]!
+.macro save_registers
+	/* x0-x7 registers store function call arguments. They may also by used for storage of
+	 * temporary values. These registers must be saved when ISR starts to make possible
+	 * restore of former execution state.
+	 */
+	stp	x0, x1, [sp, #-0x10]!
+	stp	x2, x3, [sp, #-0x10]!
+	stp	x4, x5, [sp, #-0x10]!
+	stp	x6, x7, [sp, #-0x10]!
+
+	/* x8 register is a special to store indirect results. It must be stored to restore
+	 * former execution state.
+	 *
+	 * x9-x15 are temporary registers that are caller saved.
+	 */
+	stp	x8, x9, [sp, #-0x10]!
+	stp	x10, x11, [sp, #-0x10]!
+	stp	x12, x13, [sp, #-0x10]!
+	stp	x14, x15, [sp, #-0x10]!
+
+	/* x16, x17 are special registers, intra procedure call temporary registers. They may be
+	 * used for call veneers or as temporary intermediate values between subrutine calls.
+	 * x18 is a platform register and is reserved for use of platform ABI. In other case it is
+	 * temporary register.
+	 *
+	 * NOTE: x19 is a callee saved register. It is used here to make sure the SP holds a value
+	 *       aligned to 16 bytes.
+	 */
+	stp	x16, x17, [sp, #-0x10]!
+	stp 	x18, x19, [sp, #-0x10]!
+
+	/* x20-x28 are calee saved registers. Make sure the assembler ISR does not use them or
+	 * saver appropriate register on stack.
+	 */
+
+	/* x29 (FP) and x30(LR) registers are always stored at the end of a preparation for
+	 * ISR execution.
+	 */
+	stp 	x29, x30, [sp, #-0x10]!
+
+	/* Prepare FP in case an assemblu ISR requires to use it as base for access to data stored
+	 * on a stack, hence the FP(x29) should point to a base of a function call frame.
+
+	 * NOTE: This operation may be optimized out in case the stack will be left in unchanged
+	 *       state by assembly ISR code.
+	 */
+	mov	x29, SP
 .endm
 
-.macro restoreregister
-	ldp 	X29,X30, [sp], #0x10
-	ldp 	X18,X19, [sp], #0x10
-	ldp	X16,X17, [sp], #0x10
-	ldp	X14,X15, [sp], #0x10
-	ldp	X12,X13, [sp], #0x10
-	ldp	X10,X11, [sp], #0x10
-	ldp	X8,X9, [sp], #0x10
-	ldp	X6,X7, [sp], #0x10
-	ldp	X4,X5, [sp], #0x10
-	ldp	X2,X3, [sp], #0x10
-	ldp	X0,X1, [sp], #0x10
+.macro restore_registers
+	/* Restore SP, just in case an assembly ISR code left it in different state than it was
+	 * at end of an prologue.
+	 *
+	 * NOTE: This operation may be optimized out in case the stack is unchanged by assembly ISR
+	 *       code.
+	 */
+	mov	SP, x29
+	/* Restore registers from stack, so in reverse order of storeregister macro.
+	 * FP and LR registers at first.
+	 *
+	 * NOTE: Restore of LR does not cause return and it will not be used as a return address.
+	 *       The macro is suposed to be used in ISR context, hence the return address is stored
+	 *       in ELR_ELx register. This operation restores LR to the state is was when exception
+	 *       happened. It makes the event transpared to the code that was interrupted.
+	 */
+	ldp 	x29, x30, [sp], #0x10
+	/* x20-x28 callee saved registers must be restored in case they were used by
+	 * assembler ISR code. C/C++ handler will restore them by compiled code.
+	 *
+	 * NOTE: x19 is also callee saved register but it was saved to make sure the SP is correctly
+	 *       aligned.
+	 *
+	 * Restore all other saved registers.
+	 */
+	ldp 	x18, x19, [sp], #0x10
+	ldp	x16, x17, [sp], #0x10
+	ldp	x14, x15, [sp], #0x10
+	ldp	x12, x13, [sp], #0x10
+	ldp	x10, x11, [sp], #0x10
+	ldp	x8, x9, [sp], #0x10
+	ldp	x6, x7, [sp], #0x10
+	ldp	x4, x5, [sp], #0x10
+	ldp	x2, x3, [sp], #0x10
+	ldp	x0,x1, [sp], #0x10
 .endm
 
-.macro savefloatregister
+.macro save_float_registers
 
 /* Load the floating point context array address from FPUContextBase */
 	ldr	x1,=FPUContextBase
 	ldr	x0, [x1]
 
 /* Save all the floating point register to the array */
-	stp	q0,q1, [x0], #0x20
-	stp	q2,q3, [x0], #0x20
-	stp	q4,q5, [x0], #0x20
-	stp	q6,q7, [x0], #0x20
-	stp	q8,q9, [x0], #0x20
-	stp	q10,q11, [x0], #0x20
-	stp	q12,q13, [x0], #0x20
-	stp	q14,q15, [x0], #0x20
-	stp	q16,q17, [x0], #0x20
-	stp	q18,q19, [x0], #0x20
-	stp	q20,q21, [x0], #0x20
-	stp	q22,q23, [x0], #0x20
-	stp	q24,q25, [x0], #0x20
-	stp	q26,q27, [x0], #0x20
-	stp	q28,q29, [x0], #0x20
-	stp	q30,q31, [x0], #0x20
+	stp	q0, q1, [x0], #0x20
+	stp	q2, q3, [x0], #0x20
+	stp	q4, q5, [x0], #0x20
+	stp	q6, q7, [x0], #0x20
+	stp	q8, q9, [x0], #0x20
+	stp	q10, q11, [x0], #0x20
+	stp	q12, q13, [x0], #0x20
+	stp	q14, q15, [x0], #0x20
+	stp	q16, q17, [x0], #0x20
+	stp	q18, q19, [x0], #0x20
+	stp	q20, q21, [x0], #0x20
+	stp	q22, q23, [x0], #0x20
+	stp	q24, q25, [x0], #0x20
+	stp	q26, q27, [x0], #0x20
+	stp	q28, q29, [x0], #0x20
+	stp	q30, q31, [x0], #0x20
 	mrs	x2, FPCR
 	mrs	x3, FPSR
 	stp	x2, x3, [x0], #0x10
@@ -124,32 +182,32 @@
 	str	x0, [x1]
 .endm
 
-.macro restorefloatregister
+.macro restore_float_registers
 
 /* Restore the address of floating point context array from FPUContextBase */
-	ldr	x1,=FPUContextBase
+	ldr	x1, =FPUContextBase
 	ldr	x0, [x1]
 
 /* Restore all the floating point register from the array */
-	ldp	x2, x3, [x0,#-0x10]!
+	ldp	x2, x3, [x0, #-0x10]!
 	msr	FPCR, x2
 	msr	FPSR, x3
-	ldp	q30,q31, [x0,#-0x20]!
-	ldp	q28,q29, [x0,#-0x20]!
-	ldp	q26,q27, [x0,#-0x20]!
-	ldp	q24,q25, [x0,#-0x20]!
-	ldp	q22,q23, [x0,#-0x20]!
-	ldp	q20,q21, [x0,#-0x20]!
-	ldp	q18,q19, [x0,#-0x20]!
-	ldp	q16,q17, [x0,#-0x20]!
-	ldp	q14,q15, [x0,#-0x20]!
-	ldp	q12,q13, [x0,#-0x20]!
-	ldp	q10,q11, [x0,#-0x20]!
-	ldp	q8,q9, [x0,#-0x20]!
-	ldp	q6,q7, [x0,#-0x20]!
-	ldp	q4,q5, [x0,#-0x20]!
-	ldp	q2,q3, [x0,#-0x20]!
-	ldp	q0,q1, [x0,#-0x20]!
+	ldp	q30, q31, [x0, #-0x20]!
+	ldp	q28, q29, [x0, #-0x20]!
+	ldp	q26, q27, [x0, #-0x20]!
+	ldp	q24, q25, [x0, #-0x20]!
+	ldp	q22, q23, [x0, #-0x20]!
+	ldp	q20, q21, [x0, #-0x20]!
+	ldp	q18, q19, [x0, #-0x20]!
+	ldp	q16, q17, [x0, #-0x20]!
+	ldp	q14, q15, [x0, #-0x20]!
+	ldp	q12, q13, [x0, #-0x20]!
+	ldp	q10, q11, [x0, #-0x20]!
+	ldp	q8, q9, [x0, #-0x20]!
+	ldp	q6, q7, [x0, #-0x20]!
+	ldp	q4, q5, [x0, #-0x20]!
+	ldp	q2, q3, [x0, #-0x20]!
+	ldp	q0, q1, [x0, #-0x20]!
 
 /* Save current address of floating point context array to FPUContextBase */
 	str	x0, [x1]
@@ -164,21 +222,47 @@
 .endm
 
 .macro get_esr_elx
-/* Check current exception level to ger proper exceptions syndrom register */
+	/* Check current exception level to ger proper exceptions syndrom register */
 	mrs	x0, currentEL
 	cmp	x0, CURR_EL2
-	blt	el_1
-	bgt	el_3
-el_2:
+	blt	2f
+	bgt	3f
+1:
 	mrs	x0, ESR_EL2
-	b	isr_cont
-el_1:
+	b	4f
+2:
 	mrs	x0, ESR_EL1
-	b	isr_cont
-el_3:
+	b	4f
+3:
 	mrs	x0, ESR_EL3
-isr_cont:
+4:
+	/* Continue execution */
 .endm
+
+.macro get_cptr_elx
+	/* Check current exception level to ger proper exceptions syndrom register */
+	mrs	x0, currentEL
+	cmp	x0, CURR_EL2
+	blt	2f
+	bgt	3f
+1:
+	mrs	x0, CPTR_EL2
+	bic	x0, x0, #(0x1<<10)
+	msr	CPTR_EL2, x0
+	b	4f
+2:
+	mrs	x0, CPACR_EL1
+	bic	x0, x0, #(0x1<<20)
+	msr	CPACR_EL1, x0
+	b	4f
+3:
+	mrs	x0, CPTR_EL3
+	bic	x0, x0, #(0x1<<10)
+	msr	CPTR_EL3, x0
+4:
+	/* Continue execution */
+.endm
+
 
 .org 0
 
@@ -269,7 +353,7 @@ _vector_table:
 	b	SErrorInterruptHandler
 
 SynchronousInterruptHandler:
-	saveregister
+	save_registers
 
 	get_esr_elx
 
@@ -283,15 +367,7 @@ SynchronousInterruptHandler:
  * If excpetion occurred due to floating point access, Enable the floating point
  * access i.e. do not trap floating point instruction
  */
- .if (EL3 == 1)
-	mrs	x1,CPTR_EL3
-	bic	x1, x1, #(0x1<<10)
-	msr	CPTR_EL3, x1
-.else
-	mrs	x1,CPACR_EL1
-	orr	x1, x1, #(0x1<<20)
-	msr	CPACR_EL1, x1
-.endif
+	get_cptr_elx
 	isb
 
 /* If the floating point access was previously enabled, store FPU context
@@ -312,17 +388,17 @@ SynchronousInterruptHandler:
 	str	x0,[x1]
 	b	restorecontext
 storefloat:
-	savefloatregister
+	save_float_registers
 	b	restorecontext
 synchronoushandler:
 	bl	SynchronousInterrupt
 restorecontext:
-	restoreregister
+	restore_registers
 	exception_return
 
 IRQInterruptHandler:
 
-	saveregister
+	save_registers
 /* Save the status of SPSR, ELR and CPTR to stack */
  .if (EL3 == 1)
 	mrs 	x0, CPTR_EL3
@@ -364,7 +440,7 @@ IRQInterruptHandler:
 	beq	RestorePrevState
 .endif
 
-	restorefloatregister
+	restore_float_registers
 
 /* Restore the status of SPSR, ELR and CPTR from stack */
 RestorePrevState:
@@ -379,12 +455,12 @@ RestorePrevState:
 	msr	ELR_EL1, x1
 	msr	SPSR_EL1, x2
 .endif
-	restoreregister
+	restore_registers
 	exception_return
 
 FIQInterruptHandler:
 
-  saveregister
+  save_registers
 /* Save the status of SPSR, ELR and CPTR to stack */
  .if (EL3 == 1)
 	mrs 	x0, CPTR_EL3
@@ -425,7 +501,7 @@ FIQInterruptHandler:
 	beq	RestorePrevStatefiq
 .endif
 
-	restorefloatregister
+	restore_float_registers
 
 	/* Restore the status of SPSR, ELR and CPTR from stack */
 RestorePrevStatefiq:
@@ -440,16 +516,16 @@ RestorePrevStatefiq:
 	msr	ELR_EL1, x1
 	msr	SPSR_EL1, x2
 .endif
-	restoreregister
+	restore_registers
 	exception_return
 
 SErrorInterruptHandler:
 
-	saveregister
+	save_registers
 
 	bl      SErrorInterrupt
 
-	restoreregister
+	restore_registers
 
 	exception_return
 
