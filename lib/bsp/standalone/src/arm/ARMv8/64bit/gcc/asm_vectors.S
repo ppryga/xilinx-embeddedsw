@@ -43,6 +43,7 @@
 
 .globl _boot
 .globl _vector_table
+.globl _reset_vector
 
 .globl FIQInterrupt
 .globl IRQInterrupt
@@ -162,9 +163,7 @@
 
 .section .vectors, "a"
 
-_vector_table:
-.set	VBAR, _vector_table
-.org VBAR
+_reset_vector:
 /*
  * if application is built for XEN GUEST as EL1 Non-secure following image
  * header is required by XEN.
@@ -196,8 +195,18 @@ _vector_table:
 	.dword	0
 	/* End of Image header.  */
 .endif
-
 	b	_boot
+
+/* VBAR_ELx register has reserved bits [10:0], vector base address is store in bits [63:11].
+ * The address of vector table must be aligned to the 11 bits bounday. In other case VBAR_ELx will
+ * always be wrong.
+ */
+.p2align 11
+
+_vector_table:
+.set	VBAR, _vector_table
+.org VBAR
+
 .org (VBAR + 0x200)
 	b	SynchronousInterruptHandler
 

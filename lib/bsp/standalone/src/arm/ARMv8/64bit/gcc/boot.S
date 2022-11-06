@@ -82,6 +82,7 @@
 .global __el1_stack
 .global __el0_stack
 .global _vector_table
+.global _reset_vector
 
 .set EL3_stack, __el3_stack
 .set EL2_stack, __el2_stack
@@ -96,6 +97,7 @@
 .set L2Table, MMUTableL2
 .set vector_base, _vector_table
 .set rvbar_base, 0xFD5C0040
+.set reset_vector, _reset_vector
 
 #if defined (versal)
 .set counterfreq, XPAR_CPU_CORTEXA72_0_TIMESTAMP_CLK_FREQ
@@ -170,6 +172,7 @@ InitEL3:
 	msr	VBAR_EL3, x1
 
 	/* Set reset vector address */
+	ldr	x1, =reset_vector
 	/* Get the cpu ID */
 	mrs	x0, MPIDR_EL1
 	and	x0, x0, #0xFF
