@@ -526,16 +526,12 @@ InitEL1:
 	ldr	x1, =vector_base
 	msr	VBAR_EL1, x1
 
-	/* Trap floating point access only in case of standalone BSP */
-#ifdef FREERTOS_BSP
+	/* Do not trap execution of instructions that access Advanced SIMD or Floating-point
+	 * registers in any case (FPEN bits[21:20] = 0b11).
+	 */
 	mrs	x0, CPACR_EL1
 	orr	x0, x0, #(0x3 << 20)
 	msr	CPACR_EL1, x0
-#else
-	mrs	x0, CPACR_EL1
-	bic	x0, x0, #(0x3 << 20)
-	msr	CPACR_EL1, x0
-#endif
 	isb
 
 	/* Clear FPUStatus variable to make sure that it contains current
