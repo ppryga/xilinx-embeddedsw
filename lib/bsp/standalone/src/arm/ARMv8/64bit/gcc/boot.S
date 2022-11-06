@@ -543,7 +543,7 @@ InitEL1:
 	ldr x0, =FPUStatus
 	str xzr, [x0]
 #endif
-	/* Define stack pointer for current exception level*/
+	/* Define stack pointer for current exception level */
 	ldr	x2, =EL1_stack
 	mov	sp, x2
 
@@ -590,26 +590,65 @@ InitEL1:
 #endif
 	msr	TCR_EL1, x1
 	isb
+
+#ifndef CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT
 	/* Enable SError Exception for asynchronous abort */
 	mrs	x1, DAIF
 	bic	x1, x1, #(0x1<<8)
 	msr	DAIF, x1
+#endif /* CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT */
 
-	/* Enable MMU */
+	/* Configure System Control Register SCTLR_EL1:
+	 * - Do not enable access to DC CVAU, DC CIVAC, DC CVAC and IC IVAU instructions, reset
+	 *   value (UCI bit[26] = 0)
+	 * - Use little endian for data access at EL1 and stage 1 translation table at EL1, EL0
+	 *   (EE bit[25] = 0)
+	 * - Use little endian for data access at EL0 (EOE bit[24] = 0)
+	 * - Do not force XN permissions for regions with write permissions (WXN bit[19] = 0)
+	 * - Do not trap WFE instruction executed at EL0 to EL1, reset value (nTWE bit[18] = 1)
+	 * - Do not trap WFI instruction executed at EL0 to EL1, reset value (nTWI bit[17] = 1)
+	 * - Do not enable access to CTR_EL0 from EL0, reset value(UCT bit[15] = 0)
+	 * - Do not enable access to DC ZVA instruction from EL0, reset value (DZE bit[14] = 0)
+	 * - Enable instructions cache (I bit[12] - 1)
+	 * - Do not enable access to interrup mask from EL0, reset value (UMA bit[9] = 0)
+	 * - Enable SETEND instruction, reset value (SED bit[8] = 0)
+	 * - Enable IT instruction, reset value (ITD bit[7] = 0)
+	 * - Enable CP15 barrier, reset value (CP15BEN bit[5] = 1)
+	 * - Enable EL0 stack pointer alignment check, reset value (SAO bit[4] = 1)
+	 * - Enable stack pointer alignment check, reset value (SA bit[3] = 1)
+	 * - Enable data and unified cache (C bit[2] = 1)
+	 * - Disable alignment fault checking, reset value (A bit[1] = 0)
+	 * - Enable MMU for EL2 (M bit[0] = 1)
+	 */
 	mov	x1, #0x0
-	orr	x1, x1, #(1 << 18)	// Set WFE non trapping
-	orr	x1, x1, #(1 << 17)	// Set WFI non trapping
-	orr	x1, x1, #(1 << 5)	// Set CP15 barrier enabled
+	orr	x1, x1, #(1 << 18)	// Set nTWE bit
+	orr	x1, x1, #(1 << 17)	// Set nTWI bit
 	orr	x1, x1, #(1 << 12)	// Set I bit
+	orr	x1, x1, #(1 << 5)	// Set CP15 barrier enabled
+	orr	x1, x1, #(1 << 4)	// Set SAO bit
+	orr	x1, x1, #(1 << 3)	// Set SA bit
 	orr	x1, x1, #(1 << 2)	// Set C bit
 	orr	x1, x1, #(1 << 0)	// Set M bit
 	msr	SCTLR_EL1, x1
 	isb
 
+	/* Continue in EL1. Kernel startup should happen in EL1 exception level. If an application
+	 * is aimed to run in EL0 exception level, then kernel should switch to EL0 explicitly.
+	 *
+	 * All interrupts are still masked (DAIF) to avoid messing in kernel startup.
+	 * When kernel is ready, it will unmask interrupts.
+	 *
+	 * ToDo: Compare with Linux Kernel requirements for CPU configuration in AArch64 mode.
+	 *       I'm not sure if e.g. MMU should be enabled at this stage.
+	 *       Should SError or Asynchronous abort be disabled?
+	 *
+	 */
 	bl	_startup		// Jump to start
+#ifndef CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT
 .else
 	b	error			// Present exception level and selected exception level mismatch
 .endif /* EL1_NONSECURE == 1 */
+#endif /* CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT */
 
 error: 	b	error
 
