@@ -189,11 +189,8 @@ InitEL3:
 	ldr	x2, =EL3_stack
 	mov	sp,x2
 
-	/* Enable Trapping of SIMD/FPU register for standalone BSP */
+	/* All architectural features are not traped to EL3 */
 	mov	x0, #0
-#ifndef FREERTOS_BSP
-	orr	x0, x0, #(0x1 << 10)
-#endif
 	msr	CPTR_EL3, x0
 	isb
 
@@ -206,13 +203,26 @@ InitEL3:
 	 ldr	x0, =FPUStatus
 	 str 	xzr, [x0]
 #endif
-	/* Configure SCR_EL3 */
+	/* Configure SCR_EL3 (following Arm Cortex -A53 MPCore Processor TRM Revision: r0p4):
+	 * - Do not trap WFE (TWE bit[13] = 0) WFI (TWI - bit[12] = 0) to EL3
+	 * - Enable Secure EL1 access to CNTPS_TVAL_EL1, CNTS_CTL_EL1, and CNTPS_CVAL_EL1 registers
+	 *   (ST bit[11] = 1)
+	 * - Enable AArch64 for EL2, EL1 and EL0 (RW bit[10] = 1)
+	 * - Allow to fetch instustions from non-secure memory while being in secure mode
+	 *   (SIF bit[9] = 0)
+	 * - HVC Hyp call is disabled (HCE bit[8] = 0) for all exceptions levels.
+	 *   There is no plan to implement virtualization.
+	 * - Enable SMC instructions for all exception levels (SMD bit[7] - 0)
+	 * - Route the external aborts and SError to ELx (EA bit[3] - 0)
+	 * - Route FIQ to ELx (FIQ bit[2] - 0)
+	 * - Route IRQ to ELx (IRQ bit[1] - 0)
+	 * - Continue initialization in secure mode (NS bit[0] - 0).
+	 *   The EL2 system control registers will be initialized directly from EL3 hence there is
+	 *   no need to change to non-secure mode.
+	 */
 	mov	w1, #0			// Initial value of register is unknown
-	orr	w1, w1, #(1 << 11)	// Set ST bit (Secure EL1 can access CNTPS_TVAL_EL1, CNTPS_CTL_EL1 & CNTPS_CVAL_EL1)
-	orr	w1, w1, #(1 << 10)	// Set RW bit (EL1 is AArch64, as this is the Secure world)
-	orr	w1, w1, #(1 << 3)	// Set EA bit (SError routed to EL3)
-	orr	w1, w1, #(1 << 2)	// Set FIQ bit (FIQs routed to EL3)
-	orr	w1, w1, #(1 << 1)	// Set IRQ bit (IRQs routed to EL3)
+	orr	w1, w1, #(1 << 11)	// Set ST bit
+	orr	w1, w1, #(1 << 10)	// Set RW bit
 	msr	SCR_EL3, x1
 
 	/*configure cpu auxiliary control register EL1 */
