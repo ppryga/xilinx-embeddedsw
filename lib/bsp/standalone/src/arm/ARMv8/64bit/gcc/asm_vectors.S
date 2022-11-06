@@ -51,6 +51,10 @@
 .globl SynchronousInterrupt
 .globl FPUStatus
 
+.set EL_OFFSET, 0x2
+.set CURR_EL1, (0x1 << EL_OFFSET)
+.set CURR_EL2, (0x2 << EL_OFFSET)
+.set CURR_EL3, (0x3 << EL_OFFSET)
 /*
  * FPUContextSize is the size of the array where floating point registers are
  * stored when required. The default size corresponds to the case when there is no
@@ -159,6 +163,23 @@
 #endif
 .endm
 
+.macro get_esr_elx
+/* Check current exception level to ger proper exceptions syndrom register */
+	mrs	x0, currentEL
+	cmp	x0, CURR_EL2
+	blt	el_1
+	bgt	el_3
+el_2:
+	mrs	x0, ESR_EL2
+	b	isr_cont
+el_1:
+	mrs	x0, ESR_EL1
+	b	isr_cont
+el_3:
+	mrs	x0, ESR_EL3
+isr_cont:
+.endm
+
 .org 0
 
 .section .vectors, "a"
@@ -250,12 +271,8 @@ _vector_table:
 SynchronousInterruptHandler:
 	saveregister
 
-/* Check if the Synchronous abort is occurred due to floating point access. */
-.if (EL3 == 1)
-	mrs	x0, ESR_EL3
-.else
-	mrs	x0, ESR_EL1
-.endif
+	get_esr_elx
+
 	and	x0, x0, #(0x3F << 26)
 	mov	x1, #(0x7 << 26)
 	cmp	x0, x1
