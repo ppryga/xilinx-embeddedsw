@@ -266,7 +266,7 @@
 
 .org 0
 
-.section .vectors, "a"
+.section .vectors, "ax"
 
 _reset_vector:
 /*
