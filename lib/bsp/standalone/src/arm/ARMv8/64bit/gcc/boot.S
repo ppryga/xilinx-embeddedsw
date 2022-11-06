@@ -71,6 +71,14 @@
 #include "bspconfig.h"
 #include "xil_errata.h"
 
+/* Temporary macro that should be moved out to BSP configuration.
+ * Enables initialization of a CPU so that software can use EL3, El1 and EL0 exception levels.
+
+ * EL2 is configured in a minimal way just to enable lower exception levels.
+ * At the moment there is no plan for support virtualization.
+ */
+#define CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT 1
+
 .globl MMUTableL0
 .globl MMUTableL1
 .globl MMUTableL2
@@ -187,7 +195,7 @@ InitEL3:
 
 	/* Define stack pointer for current exception level*/
 	ldr	x2, =EL3_stack
-	mov	sp,x2
+	mov	sp, x2
 
 	/* All architectural features are not traped to EL3 */
 	mov	x0, #0
@@ -204,7 +212,7 @@ InitEL3:
 	 str 	xzr, [x0]
 #endif
 
-	/* Configure SCR_EL3 (following Arm Cortex -A53 MPCore Processor TRM Revision: r0p4):
+	/* Configure SCR_EL3 (following Arm Cortex - A53 MPCore Processor TRM Revision: r0p4):
 	 * - Do not trap WFE (TWE bit[13] = 0) WFI (TWI - bit[12] = 0) to EL3
 	 * - Enable Secure EL1 access to CNTPS_TVAL_EL1, CNTS_CTL_EL1, and CNTPS_CVAL_EL1 registers
 	 *   (ST bit[11] = 1)
@@ -282,17 +290,17 @@ InitEL3:
 	msr	MAIR_EL3, x1
 
 #if defined (versal)
-	/* Set up TCR_EL3
-	 * Physical Address Size PS =  100 -> 44bits 16 TB
-	 * Granual Size TG0 = 00 -> 4KB
-	 * size offset of the memory region T0SZ = 20 -> (region size 2^(64-20) = 2^44)
+	/* Set up TCR_EL3:
+	 * - Physical Address Size PS =  100 -> 44bits 16 TB
+	 * - Granual Size TG0 = 00 -> 4KB
+	 * - Size offset of the memory region T0SZ = 20 -> (region size 2^(64-20) = 2^44)
 	 */
 	ldr	x1,=0x80843514
 #else
-	/* Set up TCR_EL3
-	 * Physical Address Size PS =  010 -> 40bits 1TB
-	 * Granual Size TG0 = 00 -> 4KB
-	 * size offset of the memory region T0SZ = 24 -> (region size 2^(64-24) = 2^40)
+	/* Set up TCR_EL3:
+	 * - Physical Address Size PS =  010 -> 40bits 1TB
+	 * - Granual Size TG0 = 00 -> 4KB
+	 * - Size offset of the memory region T0SZ = 24 -> (region size 2^(64-24) = 2^40)
 	 */
 	ldr	x1, =0x80823518
 #endif
@@ -324,10 +332,160 @@ InitEL3:
 	dsb	sy
 	isb
 
+#ifndef CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT
+	b	_startup
+#endif /* CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT */
+
+InitEL2:
+	/* Configure Exception Level 2 to allow to jump to Exception Level 1. The EL2 will be not
+	 * used, hence minimal configuration is required to disable VM related features and trapping
+	 * of any instructions or register accesses to EL2.
+	 */
+
+	/* Set vector table base address. The EL2 (support for virtualization) is not planned to be
+	 * in use.
+	 *
+	 * ToDo: Change to EL2 specific exceptions vector table with graceful handling of unexpected
+	 *       exceptions arriving to EL2.
+	 */
+	ldr	x1, =vector_base
+	msr	VBAR_EL2, x1
+
+	/* Define stack pointer for current exception level*/
+	ldr	x2, =EL2_stack
+	mov	sp, x2
+
+	/* Set address translation L0 table for EL2.
+	 * Virtualization will not be enabled hence the Virtualization Translation Table Base
+	 * Address Register (VTTBR_EL2) is not set (left in default, unknonw state).
+	 *
+	 * ToDo: Check if the table and memory should be configured in the same way for different
+	 * exception levels.
+	 */
+	ldr	x1, =L0Table		// Get address of level 0 for TTBR0_EL3
+	msr	TTBR0_EL2, x1		// Set TTBR0_EL3
+
+	/* Set up memory attributes. This equates to:
+	 * 0 = b01000100 = Normal, Inner/Outer Non-Cacheable
+	 * 1 = b11111111 = Normal, Inner/Outer WB/WA/RA
+	 * 2 = b00000000 = Device-nGnRnE
+	 * 3 = b00000100 = Device-nGnRE
+	 * 4 = b10111011 = Normal, Inner/Outer WT/WA/RA
+	 */
+	ldr	x1, =0x000000BB0400FF44
+	msr	MAIR_EL2, x1
+
+#if defined (versal)
+	/* Set up TCR_EL3:
+	 * - Physical Address Size PS =  100 -> 44bits 16 TB
+	 * - Granual Size TG0 = 00 -> 4KB
+	 * - Size offset of the memory region T0SZ = 20 -> (region size 2^(64-20) = 2^44)
+	 */
+	ldr	x1,=0x80843514
+#else
+	/* Set up TCR_EL3:
+	 * - Physical Address Size PS =  010 -> 40bits 1TB
+	 * - Granual Size TG0 = 00 -> 4KB
+	 * - Size offset of the memory region T0SZ = 24 -> (region size 2^(64-24) = 2^40)
+	 */
+	ldr	x1, =0x80823518
+#endif
+	/* ToDo: Check if configuration of TCR_EL2 should be the same as TCR_EL3 */
+	msr	TCR_EL2, x1
+	isb
+	/* Virtualization will not be enabled hence the Virtualization Translation Control Register
+	 * (VTCR_EL2) is not set (left in defaul, unknown state).
+	 */
+
+	/* Set Hypervison Configuration Register (HCR_EL2):
+	 * - Do not disable stage 2 instcutions cache, reset value (ID bit[33] = 0)
+	 * - Do not disable stage 2 data cache, reset value (CD bit[32] = 0)
+	 * - Enable AArch64 for EL1 exception level (RW bit[31] = 1). EL0 is configured by EL1
+	 *   register
+	 * - Do not trap non-secure EL1 reads of the virtual memory control registers to EL2, reset
+	 *   value (TRVM bit[30] = 0)
+	 * - Do not trap DV ZVA instruction to EL2, reset value (TDZ bit[28] = 0)
+	 * - Do not trap general exceptions to EL2 (TGE bit[27] = 0)
+	 * - Do not trap non-secure EL1 writes to virtual memory control registers to EL2, reset
+	 *   value (TVM bit[26] = 0)
+	 * - Do not trap non-secure EL1 TLB maintenance instructions to EL2, reset value (TTLB
+	 *   bit[25] = 0)
+	 * - Do not trap non-secure EL1, EL0 cache maintenance instructions to Point of Coherency
+	 * - to EL2, reset value (TPC bit[24] = 0)
+	 * - Do not trap non-secure EL1, EL0 data orunified cache maintenance instructions to Point
+	 *   of Coherency (TPC bit[23] = 0)
+	 * - Do not trap access to Auxiliary Control Registers to EL2, reset value (TACR bit[21] = 0
+	 * - Do not trap non-secure EL1, EL0 access Implenetation Dependent Functionality related
+	 *   registers (TIDCP bit[20] = 0)
+	 * - Do not trap SMC instruction to EL2, reset value (TSC bit[19] = 0)
+	 * - Do not trap non-secure reads of ID group 3 registers to EL2, reset value (TID3
+	 *   bit[18] = 0)
+	 * - Do not trap non-secure reads of ID group 2 registers to EL2, reset value (TID2
+	 *   bit[17] = 0)
+	 * - Do not trap non-secure reads of ID group 1 registers to EL2, reset value (TID1
+	 *   bit[16] = 0)
+	 * - Do not trap non-secure reads of ID group 0 registers to EL2, reset value (TID0
+	 *   bit[15] = 0)
+	 * - Do not trap non-secure EL1, EL0 WFE instruction to EL2, reset value (TWE bit[14] = 0)
+	 * - Do not trap non-secure EL1, EL0 WFI instruction to EL2, reset value (TWI bit[13] = 0)
+	 * - Do not enable default cacheability for non-secure EL1, EL0, reset value (DC
+	 *   bit[12] = 0)
+	 * - Do not upgrade non-secure EL1, EL0 barrier shareability, reset value (BSU
+	 *   bits[11:10] = 0b00)
+	 * - Do not enable forcing broadcast for Inner Shareable domain when non-secure EL1, reset
+	 *   value (FB bit[9] = 0)
+	 * - Do not enable Viaual SError interrupt pending, reset value (VSE bit[8] = 0)
+	 * - Do not enable Viaual IRQ interrupt pending, reset value (VI bit[7] = 0)
+	 * - Do not enable Viaual FIQ interrupt pending, reset value (VF bit[6] = 0)
+	 * - Do not route EL1, EL0 physical asynchronous abort and SError interrupt to EL2, reset
+	 *   value (AMO bit[5] = 0)
+	 * - Do not route EL1, EL0 physical IRQ interrupt to EL2, reset value (IMO bit[4] = 0)
+	 * - Do not route EL1, EL0 physical FRQ interrupt to EL2, reset value (IMO bit[3] = 0)
+	 * - Do not enable protected Table Walk, reset value (PTW bit[2] = 0)
+	 * - Do not enable data change invalidate by set/way instructions (SWIO bit[1] = 0)
+	 * - Do not enable second stage of translation, reset value (VM bit[0] = 0)
+	 */
+	mov	x1, #0
+	orr	x1, x1, #(1 << 31)	// Set RW bit
+	msr	HCR_EL2, x1
+	isb
+
+	/* All architectural features are not traped to EL2 */
+	mov	x0, #0
+	msr	CPTR_EL2, x0
+	isb
+
+	/* Do not trap any access to coprocessor primary registers CRn to Hypervisor mode */
+	mov	x0, #0
+	msr	HSTR_EL2, x0
+	isb
+
+	/* Hyp Auxiliary Configuration registrer (HACR_EL2) is not implemented in A53 MPCore
+	 * Processor revision: r0p4.
+	 */
+
+	/* Configure System Control Register SCTLR_EL2:
+	 * - Use little endian for data access and stage 1 translation table at EL2 (EE bit[25] = 0)
+	 * - Do not force XN permissions for regions with write permissions (WXN bit[19] = 0)
+	 * - Enable instructions cache (I bit[12] - 1)
+	 * - Enable stack pointer alignment check (SA bit[3] = 1)
+	 * - Enable data and unified cache (C bit[2] = 1)
+	 * - Disable alignment fault checking (A bit[1] = 0)
+	 * - Enable MMU for EL2 (M bit[0] = 1)
+	 */
+	mov	x1, #0			// Most of the SCTLR_EL2 bits are unknown at reset
+	orr	x1, x1, #(1 << 12)	// Set I bit
+	orr	x1, x1, #(1 << 3)	// Set SP bit
+	orr	x1, x1, #(1 << 2)	// Set C bit
+	orr	x1, x1, #(1 << 0)	// Set M bit
+	msr	SCTLR_EL2, x1
+	dsb	sy
+	isb
+
 	b	_startup		// Jump to start
 .else
 	b	error			// Present exception level and selected exception level mismatch
-.endif
+.endif /* EL3 == 1 */
 
 InitEL1:
 .if (EL1_NONSECURE == 1)
@@ -384,7 +542,7 @@ InitEL1:
 	 * 4 = b10111011 = Normal, Inner/Outer WT/WA/RA
 	 */
 	ldr	x1, =0x000000BB0400FF44
-	mr	MAIR_EL1, x1
+	msr	MAIR_EL1, x1
 
 #if defined (versal)
 	/* Set up TCR_EL1
@@ -422,7 +580,7 @@ InitEL1:
 	bl	_startup		// Jump to start
 .else
 	b	error			// Present exception level and selected exception level mismatch
-.endif
+.endif /* EL1_NONSECURE == 1 */
 
 error: 	b	error
 
