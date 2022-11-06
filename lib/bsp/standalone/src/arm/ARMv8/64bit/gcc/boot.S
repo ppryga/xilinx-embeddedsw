@@ -174,7 +174,9 @@ OKToRun:
 
 	b 	error		// go to error if current exception level is neither EL3 nor EL1
 InitEL3:
+#ifndef CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT
 .if (EL3 == 1)
+#endif /* CONFIG_MULTI_LEVEL_EXCEPTIONS_INIT */
 	/* Set vector table base address*/
 	ldr	x1, =vector_base
 	msr	VBAR_EL3, x1
@@ -628,7 +630,7 @@ InitEL1:
 	orr	x1, x1, #(1 << 4)	// Set SAO bit
 	orr	x1, x1, #(1 << 3)	// Set SA bit
 	orr	x1, x1, #(1 << 2)	// Set C bit
-	orr	x1, x1, #(1 << 0)	// Set M bit
+	//orr	x1, x1, #(1 << 0)	// Set M bit
 	msr	SCTLR_EL1, x1
 	isb
 
