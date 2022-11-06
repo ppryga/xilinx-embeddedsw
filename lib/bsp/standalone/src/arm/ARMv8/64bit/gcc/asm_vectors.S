@@ -41,11 +41,10 @@
  * to deliver that in "C" code e.g. check if stack limist are not exceeded.
  */
 #include "bspconfig.h"
-.include "esr.S"
+
 
 .org 0
 .text
-
 .globl _boot
 .globl _vector_table
 .globl _reset_vector
@@ -61,6 +60,11 @@
 .set CURR_EL1, (0x1 << EL_OFFSET)
 .set CURR_EL2, (0x2 << EL_OFFSET)
 .set CURR_EL3, (0x3 << EL_OFFSET)
+
+/* Constants related with Exception Syndrome Register ELx. */
+.set ESR_ELX_EC_MASK,   0x3F
+.set ESR_ELX_EC_OFFSET, 26
+.set ESR_ELX_EC_ASIMD,  0x7
 
 .set STACK_SIZE, _STACK_SIZE
 /* Number of registers that could be stored during preparation of exception handler call.
